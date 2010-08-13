@@ -38,17 +38,17 @@ handle_call({add_feed, URL}, _From, State = #state{feeds=Feeds}) ->
 	{reply, Result, NewState};
 
 handle_call(Unknown, From, State) ->
-	io:format("Unknown message ~p from ~p~n", [Unknown, From]),
+	io:format("~p: Unknown message ~p from ~p~n", [?MODULE, Unknown, From]),
 	{noreply, State}.
 
 handle_cast(stop, State) ->
 	{stop, stop, State};
 handle_cast(Unknown, State) ->
-	io:format("Unknown message ~p~n", [Unknown]),
+	io:format("~p: Unknown message ~p~n", [?MODULE, Unknown]),
 	{noreply, State}.
 
 handle_info(Msg, State) ->
-	io:format("Unknown message ~p~n", [Msg]),
+	io:format("~p: Unknown message ~p~n", [?MODULE, Msg]),
 	{noreply, State}.
 
 terminate(_Reason, _State) ->
