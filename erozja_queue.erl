@@ -1,4 +1,6 @@
 -module(erozja_queue).
+-author('baryluk@smp.if.uj.edu.pl').
+
 
 -behaviour(gen_server).
 

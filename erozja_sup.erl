@@ -1,4 +1,6 @@
 -module(erozja_sup).
+-author('baryluk@smp.if.uj.edu.pl').
+
 -behaviour(supervisor).
 
 -export([start_link/0, init/1]).

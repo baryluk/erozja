@@ -1,4 +1,6 @@
 -module(erozja_gui).
+-author('baryluk@smp.if.uj.edu.pl').
+
 
 -include_lib("wx/include/wx.hrl").
 

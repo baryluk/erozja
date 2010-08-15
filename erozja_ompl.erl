@@ -1,4 +1,5 @@
 -module(erozja_ompl).
+-author('baryluk@smp.if.uj.edu.pl').
 
 -export([start_testrss/0, merge/2]).
 

@@ -1,3 +1,5 @@
+% author 'baryluk@smp.if.uj.edu.pl'
+
 -record(rss_item, {
 	title,    % string().
 	link,     % string().

@@ -1,4 +1,6 @@
 -module(erozja_loader).
+-author('baryluk@smp.if.uj.edu.pl').
+
 
 -export([url/1, url/2]).
 

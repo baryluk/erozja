@@ -1,4 +1,6 @@
 -module(erozja_app).
+-author('baryluk@smp.if.uj.edu.pl').
+
 -behaviour(application).
 
 -export([start/2, stop/1, config_change/3]).

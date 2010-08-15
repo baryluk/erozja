@@ -1,4 +1,6 @@
 -module(erozja_parse).
+-author('baryluk@smp.if.uj.edu.pl').
+
 
 -export([file/1, string/1]).
 
