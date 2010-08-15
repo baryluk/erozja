@@ -7,13 +7,19 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {url, items=[], tref=undefined, update_interval=60, last_update=0, loader_pid, loader_monitor}).
+-record(state, {url, items=[], tref=undefined, update_interval=60, last_update=0, loader_pid, loader_monitor, type, subscribed_to=[], subscribed_by=[]}).
 
 start(URL) ->
-	gen_server:start(?MODULE, URL, []).
+	gen_server:start(?MODULE, {url, URL}, []).
 
 start_link(URL) ->
-	gen_server:start_link(?MODULE, URL, []).
+	gen_server:start_link(?MODULE, {url, URL}, []).
+
+start() ->
+	gen_server:start(?MODULE, {}, []).
+
+start_link() ->
+	gen_server:start_link(?MODULE, {}, []).
 
 
 stop(Pid) ->
@@ -40,10 +46,12 @@ add_item(Pid, Item) ->
 	gen_server:cast(Pid, {add_item, Item}).
 
 
-init(URL) ->
-	State0 = #state{url=URL},
+init({url, URL}) ->
+	State0 = #state{url=URL, type=feed},
 	State1 = set_timer(State0),
-	{ok, State1}.
+	{ok, State1};
+init({}) ->
+	{ok, #state{type=agg}}.
 
 set_timer(State = #state{tref=OldTRef, update_interval=Interval}) ->
 	case OldTRef of
@@ -59,7 +67,7 @@ handle_call(get_items, _From, State) ->
 	Items = get_items0(State),
 	{reply, Items, State};
 
-handle_call(force_update, _From, State0) ->
+handle_call(force_update, _From, State0 = #state{type=feed}) ->
 	State1 = start_update(State0),
 	State2 = set_timer(State1),
 	{reply, started_update, State2};
