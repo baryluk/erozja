@@ -25,7 +25,9 @@ testrss() ->
 	"http://www.debian.org/News/weekly/dwn.en.rdf",
 	"http://forum.trapexit.org/rss.php?t=1&amp;f=5",
 	"http://www.protest-project.eu/events_rss.xml",
-	"http://www.freebsd.org/news/rss.xml"
+	"http://www.freebsd.org/news/rss.xml",
+	"http://www.reddit.com/r/programming/new/.rss",
+	"http://feeds.digg.com/digg/container/science/popular.rss"
 	].
 % <?xml version="1.0"?>
 %<opml version="1.0">
