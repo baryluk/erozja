@@ -34,6 +34,7 @@ init(Options) ->
 
 	MB = wxMenuBar:new(),
 	File = wxMenu:new([]),
+	wxMenu:append(File, ?wxID_NEW, "Add new feed..."),
 	wxMenu:append(File, ?wxID_EXIT, "&Quit"),
 	Help = wxMenu:new([]),
 	wxMenu:append(Help, ?wxID_ABOUT, "About"),
