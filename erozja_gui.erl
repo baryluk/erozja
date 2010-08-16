@@ -45,6 +45,8 @@ init(Options) ->
 
 	MB = wxMenuBar:new(),
 	Sub = wxMenu:new(),
+	wxMenu:append(Sub, 10001, "Update all subscription", [{help, "Fetch all subscriped RSS feeds from Internet, and update any new items"}]),
+	wxMenu:appendSeparator(Sub),
 	wxMenu:append(Sub, ?wxID_NEW, "New subscription...", [{help, "Add new RSS feed to the Erozja reader"}]),
 	wxMenu:append(Sub, 10002, "New folder..."),
 	wxMenu:append(Sub, 10003, "New source...", [{help, "Add meta-sources like Planets/Blogrolls, live OMPL file, Google Reader account or Bloglines account"}]),
@@ -52,10 +54,33 @@ init(Options) ->
 	wxMenu:append(Sub, 10004, "Import subscriptions...", [{help, "Read subscriptions from OMPL file"}]),
 	wxMenu:append(Sub, 10005, "Export subscriptions...", [{help, "Save all subscriptions to OMPL file"}]),
 	wxMenu:appendSeparator(Sub),
+	wxMenu:appendCheckItem(Sub, 10006, "Work offline", [{help, "When checked Erozja will not update automatically any subscripion"}]),
+	wxMenu:appendSeparator(Sub),
 	wxMenu:append(Sub, ?wxID_EXIT, "&Quit"),
+
+	View = wxMenu:new(),
+	wxMenu:append(View, 10021, "Smaller font size"),
+	wxMenu:append(View, 10022, "Bigger font size"),
+	wxMenu:append(View, 10023, "Normal font size"),
+	wxMenu:appendSeparator(View),
+	wxMenu:appendCheckItem(View, 10013, "Reduced tree view", [{help, "Show only this tree items, which have unreaded entries"}]),
+	wxMenu:appendSeparator(View),
+	wxMenu:appendRadioItem(View, 10014, "Normal view", [{help, "Two panels: list of entries (title, date, status) on top, and entry view at bottom"}]),
+	wxMenu:appendRadioItem(View, 10015, "Wide view", [{help, "Two panels: list of entries (title, date, status) on left, and entry view at right - good for wide screens"}]),
+	wxMenu:appendRadioItem(View, 10016, "Condensated view", [{help, "Single panel: Rendered as list with both headers (title, date), and content. Status rendered using background"}]),
+	wxMenu:appendRadioItem(View, 10017, "List view", [{help, "Single panel: Show only list (title, date, status), like in the Normal view, but without entry view"}]),
+	wxMenu:appendRadioItem(View, 10018, "Deep tree view", [{help, "Single panel: Show only tree (title, date, status), similar like in the Normal view, but now it is a tree of all feeds"}]),
+	wxMenu:appendSeparator(View),
+	wxMenu:appendCheckItem(View, 10019, "Show subresources", [{help, "Show additional feeds for feed entry, like comments"}]),
+	wxMenu:appendSeparator(View),
+	wxMenu:appendRadioItem(View, 10011, "Tree on left"),
+	wxMenu:appendRadioItem(View, 10012, "Tree on right"),
+
 	Help = wxMenu:new(),
 	wxMenu:append(Help, ?wxID_ABOUT, "About"),
+
 	wxMenuBar:append(MB, Sub, "&Subscriptions"),
+	wxMenuBar:append(MB, View, "&View"),
 	wxMenuBar:append(MB, Help, "&Help"),
 	wxFrame:setMenuBar(Frame, MB),
 
@@ -75,7 +100,7 @@ init(Options) ->
 	Preview = wxHtmlWindow:new(Panel, [{style, ?wxHW_SCROLLBAR_AUTO}]),
 	wxTreeCtrl:setMinSize(Preview, {400, -1}),
 
-	wxHtmlWindow:setPage(Preview, "<b>kuku</b> <a href='s'>lll</a> ok!"),
+	wxHtmlWindow:setPage(Preview, "<b>kuku</b> <a href='wp.pl'>lll</a> ok!"),
 
 	MainSizer = wxBoxSizer:new(?wxHORIZONTAL),
 	wxSizer:add(MainSizer, Tree, [{flag, ?wxALL bor ?wxEXPAND}]),
@@ -165,7 +190,14 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 				R(R)
 			end),
 			{noreply, State#state{adder=AdderPid}};
+		10002 -> % new folder
+			{noreply, State};
+		10004 -> % import ompl
+			{noreply, State};
+		10005 -> % export ompl
+			{noreply, State};
 		_ ->
+			io:format("Clicked menu item ~p~n", [Id]),
 			{noreply, State}
 	end;
 handle_event(#wx{event=#wxClose{}}, State = #state{win=Frame}) ->
@@ -186,6 +218,7 @@ handle_event(#wx{id = Id, event = #wxTree{type = command_tree_item_activated, it
 handle_event(#wx{id = Id, event = #wxHtmlLink{type = command_html_link_clicked, linkInfo = LinkInfo}}, State = #state{}) ->
 	#wxHtmlLinkInfo{href = Href} = LinkInfo,
 	io:format("Clicked link ~p~n", [Href]),
+	spawn(fun() -> os:cmd("/usr/bin/sensible-browser '"++Href++"'") end),
 	{noreply, State};
 
 handle_event(Ev, State) ->
