@@ -14,7 +14,7 @@
 -export([start/0, start_link/0, stop/0]).
 -export([init/1, terminate/2,  code_change/3, handle_info/2, handle_call/3, handle_event/2]).
 
--record(state, {win, tree, preview}).
+-record(state, {win, tree, preview, adder}).
 
 start() ->
 	Debug = [],
@@ -34,19 +34,34 @@ init(Options) ->
 
 	Frame = wxFrame:new(wx:null(), ?wxID_ANY, "Erozja", [{size, {800, 500}}]),
 
+	Icons = wxIconBundle:new(),
+	Icon1 = wxIcon:new("icon1.png"),
+	wxIconBundle:addIcon(Icons, Icon1),
+	wxFrame:setIcons(Frame, Icons),
+
+	%wxFrame:setTitle(Frame, "5 new feeds - Erozja"),
+	wxFrame:centreOnScreen(Frame),
+	%wxFrame:maximize(Frame, [{maximize, true}]),
+
 	MB = wxMenuBar:new(),
-	File = wxMenu:new([]),
-	wxMenu:append(File, ?wxID_NEW, "Add new feed..."),
-	wxMenu:append(File, ?wxID_EXIT, "&Quit"),
-	Help = wxMenu:new([]),
+	Sub = wxMenu:new(),
+	wxMenu:append(Sub, ?wxID_NEW, "New subscription...", [{help, "Add new RSS feed to the Erozja reader"}]),
+	wxMenu:append(Sub, 10002, "New folder..."),
+	wxMenu:append(Sub, 10003, "New source...", [{help, "Add meta-sources like Planets/Blogrolls, live OMPL file, Google Reader account or Bloglines account"}]),
+	wxMenu:appendSeparator(Sub),
+	wxMenu:append(Sub, 10004, "Import subscriptions...", [{help, "Read subscriptions from OMPL file"}]),
+	wxMenu:append(Sub, 10005, "Export subscriptions...", [{help, "Save all subscriptions to OMPL file"}]),
+	wxMenu:appendSeparator(Sub),
+	wxMenu:append(Sub, ?wxID_EXIT, "&Quit"),
+	Help = wxMenu:new(),
 	wxMenu:append(Help, ?wxID_ABOUT, "About"),
-	wxMenuBar:append(MB, File, "&File"),
+	wxMenuBar:append(MB, Sub, "&Subscriptions"),
 	wxMenuBar:append(MB, Help, "&Help"),
-	wxFrame:setMenuBar(Frame,MB),
+	wxFrame:setMenuBar(Frame, MB),
 
 	wxFrame:connect(Frame, command_menu_selected),
 
-	_SB = wxFrame:createStatusBar(Frame, []),
+	_SB = wxFrame:createStatusBar(Frame),
 
 	Panel = wxPanel:new(Frame),
 
@@ -83,17 +98,25 @@ io:format("State = ~p~n", [State]),
 	{Frame, State#state{}}.
 
 %% Handled as in normal gen_server callbacks
-handle_info({'EXIT',_, wx_deleted}, State) ->
-	{noreply,State};
-handle_info({'EXIT',_, normal}, State) ->
-	{noreply,State};
+handle_info({Adder, W}, State = #state{adder=Adder}) when is_pid(Adder) ->
+	case W of
+		{add, URL} ->
+			io:format("Adding ~p~n", [URL]);
+		cancel ->
+			ok
+	end,
+	{noreply, State#state{adder=undefined}};
+handle_info({'EXIT', _, wx_deleted}, State) ->
+	{noreply, State};
+handle_info({'EXIT', _, normal}, State) ->
+	{noreply, State};
 handle_info(Msg, State) ->
 	io:format("~p: Unknown msg ~p~n", [?MODULE, Msg]),
-	{noreply,State}.
+	{noreply, State}.
 
-handle_call(Msg, _From, State) ->
-	io:format("~p: Unknown call ~p~n", [?MODULE, Msg]),
-	{reply,ok,State}.
+handle_call(Msg, From, State) ->
+	io:format("~p: Unknown call ~p from ~p~n", [?MODULE, Msg, From]),
+	{noreply, State}.
 
 %% Async Events are handled in handle_event as in handle_info
 handle_event(#wx{event=#wxCommand{type=command_listbox_selected, cmdString=Ex}}, State = #state{}) ->
@@ -107,15 +130,41 @@ handle_event(#wx{event=#wxCommand{type=command_listbox_selected, cmdString=Ex}},
 handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, State = #state{}) ->
 	case Id of
 		?wxID_ABOUT ->
-		AboutString =
-			"Erozja - RSS client and proxy.\nUsing Erlang and wxWidgets as GUI\n"
-			"Authors: Witold Baryluk",
+			AboutString =
+				"Erozja - RSS client and proxy.\nUsing Erlang and wxWidgets as GUI\n"
+				"Authors: Witold Baryluk",
 			wxMessageDialog:showModal(wxMessageDialog:new(State#state.win, AboutString,
 							[{style, ?wxOK bor ?wxICON_INFORMATION bor ?wxSTAY_ON_TOP},
 							 {caption, "About"}])),
 			{noreply, State};
 		?wxID_EXIT ->
 			{stop, normal, State};
+		?wxID_NEW ->
+			Parent = self(),
+			Env = wx:get_env(),
+			AdderPid = spawn_link(fun() ->
+				wx:set_env(Env),
+				String = "Enter URL of website to automatically detect available feeds or direct RSS feed address if you know it",
+				Dialog = wxTextEntryDialog:new(State#state.win, String,
+								[{style, ?wxOK bor ?wxCANCEL bor ?wxSTAY_ON_TOP},
+								 {caption, "New subscription"}]),
+				R = fun(F) ->
+					case wxTextEntryDialog:showModal(Dialog) of
+						?wxID_OK ->
+							NewURL = wxTextEntryDialog:getValue(Dialog),
+							case NewURL of
+								[] ->
+									F(F); % self recursion
+								_ ->
+									Parent ! {self(), {add, NewURL}}
+							end;
+						?wxID_CANCEL ->
+							Parent ! {self(), cancel}
+					end
+				end,
+				R(R)
+			end),
+			{noreply, State#state{adder=AdderPid}};
 		_ ->
 			{noreply, State}
 	end;
