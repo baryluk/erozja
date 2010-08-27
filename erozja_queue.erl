@@ -4,12 +4,16 @@
 
 -behaviour(gen_server).
 
--export([start/1, start_link/1, stop/1, add_item/2, get_items/1,
-	stop_update/1, force_update/1, set_options/2, last_update/1]).
+-export([start/0, start_link/0, start/1, start_link/1, stop/1, add_item/2, get_items/1,
+	stop_update/1, force_update/1, set_options/2, last_update/1, subscribe/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {url, items=[], tref=undefined, update_interval=60, last_update=0, loader_pid, loader_monitor, type, subscribed_to=[], subscribed_by=[]}).
+-record(state, {url, items=[], title, favicon=undefined, count_total=0, count_unreaded=1, tref=undefined, update_interval=60, last_update=0, loader_pid, loader_monitor, type, subscribed_to=[], subscribed_by=[]}).
+
+
+-define(deb_enable, 1).
+-include("erozja.hrl").
 
 start(URL) ->
 	gen_server:start(?MODULE, {url, URL}, []).
@@ -47,9 +51,13 @@ last_update(Pid) ->
 add_item(Pid, Item) ->
 	gen_server:cast(Pid, {add_item, Item}).
 
+subscribe(Pid, Data) ->
+	Self = self(),
+	gen_server:call(Pid, {subscribe, Self, Data}).
+
 
 init({url, URL}) ->
-	State0 = #state{url=URL, type=feed},
+	State0 = #state{url=URL, type=feed, title=URL},
 	State1 = set_timer(State0),
 	{ok, State1};
 init({}) ->
@@ -69,6 +77,12 @@ handle_call(get_items, _From, State) ->
 	Items = get_items0(State),
 	{reply, Items, State};
 
+handle_call({subscribe, Client, Data}, _From, State = #state{subscribed_by = Clients}) when is_pid(Client) ->
+	Reply = get_summary(State),
+	_MonitorRef = erlang:monitor(process, Client),
+	{reply, Reply, State#state{subscribed_by=[{Client, Data} | Clients]}};
+
+
 handle_call(force_update, _From, State0 = #state{type=feed}) ->
 	State1 = start_update(State0),
 	State2 = set_timer(State1),
@@ -78,16 +92,25 @@ handle_call(last_update, _From, State = #state{last_update = LastUpdate}) ->
 	{reply, LastUpdate, State};
 
 handle_call(Unknown, From, State) ->
-	io:format("~p: Unknown message ~p from ~p~n", [?MODULE, Unknown, From]),
+	?deb("Unknown call ~p from ~p~n", [Unknown, From]),
 	{noreply, State}.
 
-handle_cast({add_item, Item}, State) ->
+% messages/calls to subscribed agents:
+%   {add_item, Item}
+%   new_favicon
+%   new_title
+%   removed
+%   started_update
+%   updated
+
+handle_cast({add_item, Item}, State = #state{subscribed_by = Clients}) ->
 	State1 = add(Item, State),
+	[ Pid ! {erozja_queue, self(), Data, {add_item, Item}} || {Pid, Data} <- Clients ],
 	{noreply, State1};
 handle_cast(stop, State) ->
 	{stop, stop, State};
 handle_cast(Unknown, State) ->
-	io:format("~p: Unknown message ~p~n", [?MODULE, Unknown]),
+	?deb("Unknown cast ~p~n", [Unknown]),
 	{noreply, State}.
 
 start_update(State = #state{url=URL,loader_pid=undefined}) ->
@@ -106,14 +129,19 @@ handle_info({'DOWN', MonitorRef, process, LoaderPid, Reason}, State1 = #state{lo
 		normal ->
 			ok;
 		_ ->
-			io:format("Loader ~p for ~p down:~n Reason ~p~n", [URL, LoaderPid, Reason]),
+			io:format("~p:~p: Loader ~p for ~p down:~n Reason ~p~n", [?MODULE, self(), LoaderPid, URL, Reason]),
 			ok
 	end,
 	State2 = set_timer(State1),
 	State3 = State2#state{loader_pid=undefined, loader_monitor=undefined},
 	{noreply, State3};
+handle_info({'DOWN', _MonitorRef, process, Pid, Reason}, State1 = #state{subscribed_by = Clients, url = URL}) ->
+	io:format("~p:~p: Subscriber ~p for ~p down:~n Reason ~p~n", [?MODULE, self(), Pid, URL, Reason]),
+	NewClients = proplists:delete(Pid, Clients),
+	State2 = State1#state{subscribed_by = NewClients},
+	{noreply, State2};
 handle_info(Msg, State) ->
-	io:format("~p: Unknown message ~p~n", [?MODULE, Msg]),
+	?deb("Unknown msg ~p~n", [Msg]),
 	{noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -128,3 +156,6 @@ get_items0(_State = #state{items=Items}) ->
 
 add(Item, State = #state{items=Items}) ->
 	State#state{items = [Item | Items]}.
+
+get_summary(#state{title = Title, favicon = Favicon, count_total = CountTotal, count_unreaded = CountUnreaded, last_update = LastUpdate}) ->
+	{Title, Favicon, CountTotal, CountUnreaded, LastUpdate}.

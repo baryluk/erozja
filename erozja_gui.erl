@@ -16,6 +16,9 @@
 
 -record(state, {win, tree, preview, adder}).
 
+-define(deb_enable, 1).
+-include("erozja.hrl").
+
 start() ->
 	Debug = [],
 	wx_object:start(?MODULE, Debug, []).
@@ -88,34 +91,76 @@ init(Options) ->
 
 	_SB = wxFrame:createStatusBar(Frame),
 
-	Panel = wxPanel:new(Frame),
+	MainPanel = wxPanel:new(Frame),
 
-	Tree = wxTreeCtrl:new(Panel),
+	Splitter = wxSplitterWindow:new(MainPanel),
+
+	LeftPanel = wxPanel:new(Splitter),
+
+	Tree = wxTreeCtrl:new(LeftPanel),
 	wxTreeCtrl:setMinSize(Tree, {200, -1}),
-	I1 = wxTreeCtrl:addRoot(Tree, "Nauka", [{data, nauka}]),
-	wxTreeCtrl:appendItem(Tree, I1, "Bash", [{data, n1}]),
-	wxTreeCtrl:appendItem(Tree, I1, "BBC", [{data, n2}]),
-	wxTreeCtrl:appendItem(Tree, I1, "LV", [{data, n3}]),
 
-	Preview = wxHtmlWindow:new(Panel, [{style, ?wxHW_SCROLLBAR_AUTO}]),
+	SubTree = wxTreeCtrl:addRoot(Tree, "Main", [{data, main}]),
+
+	Feeds = erozja_manager:list_feeds(),
+	lists:foreach(fun({URL, Pid}) ->
+		Item = wxTreeCtrl:appendItem(Tree, SubTree, "URL"),
+		Data = Item,
+		AllStat = erozja_queue:subscribe(Pid, Data),
+		{Title, Favicon, CountTotal, CountUnreaded, LastUpdate} = AllStat,
+		Title1 = if
+			CountUnreaded =:= 0 -> Title;
+			true -> Title ++ " (" ++ integer_to_list(CountUnreaded) ++ ")"
+		end,
+		wxTreeCtrl:setItemText(Tree, Item, Title1),
+		Data2 = {{URL, Pid}, AllStat},
+		wxTreeCtrl:setItemData(Tree, Item, Data2),
+		if
+			CountUnreaded =/= 0 ->
+				wxTreeCtrl:setItemBold(Tree, Item);
+			true ->
+				ok
+		end
+	end, Feeds),
+	wxTreeCtrl:expand(Tree, SubTree),
+
+	RightPanel = wxPanel:new(Splitter),
+
+	Preview = wxHtmlWindow:new(RightPanel, [{style, ?wxHW_SCROLLBAR_AUTO}]),
 	wxTreeCtrl:setMinSize(Preview, {400, -1}),
 
-	wxHtmlWindow:setPage(Preview, "<b>kuku</b> <a href='wp.pl'>lll</a> ok!"),
+	wxHtmlWindow:setPage(Preview, "Erozja preview window! Select feed on left to show all entries for given feed."),
+
+	Vbox = wxBoxSizer:new(?wxHORIZONTAL),
+	wxSizer:add(Vbox, Tree, [{flag, ?wxEXPAND}]),
+	wxPanel:setSizer(LeftPanel, Vbox),
+
+	Vbox2 = wxBoxSizer:new(?wxHORIZONTAL),
+	wxSizer:add(Vbox2, Preview, [{flag, ?wxEXPAND}]),
+	wxPanel:setSizer(RightPanel, Vbox2),
+
+	wxSplitterWindow:splitVertically(Splitter, LeftPanel, RightPanel, [{sashPosition, 150}]),
+	wxSplitterWindow:setMinimumPaneSize(Splitter, 200),
 
 	MainSizer = wxBoxSizer:new(?wxHORIZONTAL),
-	wxSizer:add(MainSizer, Tree, [{flag, ?wxALL bor ?wxEXPAND}]),
-	wxSizer:add(MainSizer, Preview, [{flag, ?wxALL bor ?wxEXPAND}]),
-	wxPanel:setSizer(Panel, MainSizer),
+
+	%wxSizer:add(MainSizer, Tree, [{flag, ?wxALL bor ?wxEXPAND}]),
+	%wxSizer:add(MainSizer, Preview, [{flag, ?wxALL bor ?wxEXPAND}]),
+
+	wxSizer:add(MainSizer, Splitter, [{flag, ?wxEXPAND}]),
+
+	wxPanel:setSizer(MainPanel, MainSizer),
 
 	wxFrame:show(Frame),
 
-
 	wxTreeCtrl:connect(Tree, command_tree_item_activated),
+	wxTreeCtrl:connect(Tree, command_tree_sel_changed),
+
 	wxHtmlWindow:connect(Preview, command_html_link_clicked),
 
 	State = #state{win=Frame,tree=Tree,preview=Preview},
 
-io:format("State = ~p~n", [State]),
+	?deb("State = ~p~n", [State]),
 
 	wxToolTip:enable(true),
 	wxToolTip:setDelay(500),
@@ -126,21 +171,24 @@ io:format("State = ~p~n", [State]),
 handle_info({Adder, W}, State = #state{adder=Adder}) when is_pid(Adder) ->
 	case W of
 		{add, URL} ->
-			io:format("Adding ~p~n", [URL]);
+			erozja_manager:add_feed(URL);
 		cancel ->
 			ok
 	end,
 	{noreply, State#state{adder=undefined}};
+handle_info({erozja_queue, _From, Data, Msg}, State) ->
+%	?deb("msg from queue:~n  ~p~n", [Msg]),
+	{noreply, State};
 handle_info({'EXIT', _, wx_deleted}, State) ->
 	{noreply, State};
 handle_info({'EXIT', _, normal}, State) ->
 	{noreply, State};
 handle_info(Msg, State) ->
-	io:format("~p: Unknown msg ~p~n", [?MODULE, Msg]),
+	?deb("Unknown msg ~p~n", [Msg]),
 	{noreply, State}.
 
 handle_call(Msg, From, State) ->
-	io:format("~p: Unknown call ~p from ~p~n", [?MODULE, Msg, From]),
+	?deb("Unknown call ~p from ~p~n", [Msg, From]),
 	{noreply, State}.
 
 %% Async Events are handled in handle_event as in handle_info
@@ -156,7 +204,7 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 	case Id of
 		?wxID_ABOUT ->
 			AboutString =
-				"Erozja - RSS client and proxy.\nUsing Erlang and wxWidgets as GUI\n"
+				"Erozja - Atom and RSS client and proxy.\nUsing Erlang and wxWidgets as GUI\n"
 				"Authors: Witold Baryluk",
 			wxMessageDialog:showModal(wxMessageDialog:new(State#state.win, AboutString,
 							[{style, ?wxOK bor ?wxICON_INFORMATION bor ?wxSTAY_ON_TOP},
@@ -173,13 +221,14 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 				Dialog = wxTextEntryDialog:new(State#state.win, String,
 								[{style, ?wxOK bor ?wxCANCEL bor ?wxSTAY_ON_TOP},
 								 {caption, "New subscription"}]),
-				R = fun(F) ->
+				R = fun(F, InitText) ->
+					wxTextEntryDialog:setValue(Dialog, InitText),
 					case wxTextEntryDialog:showModal(Dialog) of
 						?wxID_OK ->
 							NewURL = wxTextEntryDialog:getValue(Dialog),
 							case NewURL of
 								[] ->
-									F(F); % self recursion
+									F(F, NewURL); % self recursion
 								_ ->
 									Parent ! {self(), {add, NewURL}}
 							end;
@@ -187,7 +236,7 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 							Parent ! {self(), cancel}
 					end
 				end,
-				R(R)
+				R(R, "")
 			end),
 			{noreply, State#state{adder=AdderPid}};
 		10002 -> % new folder
@@ -197,32 +246,37 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 		10005 -> % export ompl
 			{noreply, State};
 		_ ->
-			io:format("Clicked menu item ~p~n", [Id]),
+			?deb("Clicked menu item ~p~n", [Id]),
 			{noreply, State}
 	end;
 handle_event(#wx{event=#wxClose{}}, State = #state{win=Frame}) ->
-	ok = wxFrame:setStatusText(Frame, "Closing...",[]),
+	ok = wxFrame:setStatusText(Frame, "Closing...", []),
 	{stop, normal, State};
 
 handle_event(#wx{id = Id, event = #wxTree{type = command_tree_item_activated, item = ItemNum}}, State = #state{tree=Tree}) ->
-	%io:format("Selected item ~p~n", [ItemNum]),
 	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
-	io:format("  data ~p~n", [Data]),
+	?deb("  double click on item ~p ~n    with data ~p~n", [ItemNum, Data]),
 	wxTreeCtrl:setItemBold(Tree, ItemNum, [{bold, true}]),
 	{noreply, State};
 
-	%wxTreeCtrl:getSelection(Tree)
-	%wxTreeCtrl:setItemData(Tree, ItemNumber, Data),
+handle_event(#wx{id = Id, event = #wxTree{type = command_tree_sel_changed, item = ItemNum}}, State = #state{tree=Tree}) ->
+	ItemNum = wxTreeCtrl:getSelection(Tree),
+	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
+	?deb("  selection on item ~p ~n    with data ~p~n", [ItemNum, Data]),
+	{noreply, State};
+
+	%wxTreeCtrl:selectItem(Tree, ItemNum)
+	%wxTreeCtrl:setItemData(Tree, ItemNumber, Data)
 
 
 handle_event(#wx{id = Id, event = #wxHtmlLink{type = command_html_link_clicked, linkInfo = LinkInfo}}, State = #state{}) ->
 	#wxHtmlLinkInfo{href = Href} = LinkInfo,
-	io:format("Clicked link ~p~n", [Href]),
+	?deb("Clicked link ~p~n", [Href]),
 	spawn(fun() -> os:cmd("/usr/bin/sensible-browser '"++Href++"'") end),
 	{noreply, State};
 
 handle_event(Ev, State) ->
-	io:format("~p: Unknown event ~p~n", [?MODULE, Ev]),
+	?deb("Unknown event ~p~n", [Ev]),
 	{noreply, State}.
 
 code_change(_, _, State) ->

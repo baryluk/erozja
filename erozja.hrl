@@ -9,3 +9,14 @@
 	fetched,  % integer(). % unix timestamp
 	source    % atom(). % name of process
 }).
+
+-ifdef(deb_enable).
+-define(deb(Format, Fields),
+   begin
+      io:format("~p ~p.erl:~p~n   ", [self(), ?MODULE, ?LINE]),
+      io:format(Format, Fields)
+   end).
+-else.
+-define(deb(Format, Fields),
+   ok).
+-endif.
