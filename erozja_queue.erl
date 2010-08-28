@@ -9,7 +9,7 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--record(state, {url, items=[], title, favicon=undefined, count_total=0, count_unreaded=1, tref=undefined, update_interval=60, last_update=0, loader_pid, loader_monitor, type, subscribed_to=[], subscribed_by=[]}).
+-record(state, {url, items=[], title, favicon=undefined, count_total=0, count_unreaded=0, tref=undefined, update_interval=60, last_update=0, loader_pid, loader_monitor, type, subscribed_to=[], subscribed_by=[]}).
 
 
 -define(deb_enable, 1).
@@ -105,7 +105,7 @@ handle_call(Unknown, From, State) ->
 
 handle_cast({add_item, Item}, State = #state{subscribed_by = Clients}) ->
 	State1 = add(Item, State),
-	[ Pid ! {erozja_queue, self(), Data, {add_item, Item}} || {Pid, Data} <- Clients ],
+	notify({add_item, Item}, Clients),
 	{noreply, State1};
 handle_cast(stop, State) ->
 	{stop, stop, State};
@@ -113,8 +113,9 @@ handle_cast(Unknown, State) ->
 	?deb("Unknown cast ~p~n", [Unknown]),
 	{noreply, State}.
 
-start_update(State = #state{url=URL,loader_pid=undefined}) ->
+start_update(State = #state{url=URL,loader_pid=undefined, subscribed_by = Clients}) ->
 	{LoaderPid, LoaderMonitor} = spawn_monitor(erozja_loader, url, [URL, self()]),
+	notify({update_started, LoaderPid}, Clients),
 	State#state{loader_pid=LoaderPid, loader_monitor=LoaderMonitor};
 start_update(State = #state{url=_URL,loader_pid=OldLoader}) when is_pid(OldLoader) ->
 	State.
@@ -124,11 +125,13 @@ handle_info(update_by_timer, State0) ->
 	State1 = start_update(State0),
 	State2 = set_timer(State1),
 	{noreply, State2};
-handle_info({'DOWN', MonitorRef, process, LoaderPid, Reason}, State1 = #state{loader_pid = LoaderPid, loader_monitor=MonitorRef, url=URL}) ->
+handle_info({'DOWN', MonitorRef, process, LoaderPid, Reason}, State1 = #state{loader_pid = LoaderPid, loader_monitor=MonitorRef, url=URL, subscribed_by = Clients}) ->
 	case Reason of
 		normal ->
+			notify({update_done, LoaderPid, ok}, Clients),
 			ok;
 		_ ->
+			notify({update_done, LoaderPid, error}, Clients),
 			io:format("~p:~p: Loader ~p for ~p down:~n Reason ~p~n", [?MODULE, self(), LoaderPid, URL, Reason]),
 			ok
 	end,
@@ -159,3 +162,8 @@ add(Item, State = #state{items=Items}) ->
 
 get_summary(#state{title = Title, favicon = Favicon, count_total = CountTotal, count_unreaded = CountUnreaded, last_update = LastUpdate}) ->
 	{Title, Favicon, CountTotal, CountUnreaded, LastUpdate}.
+
+notify(Msg, Clients) ->
+	lists:foreach(fun({Pid, Data}) ->
+		Pid ! {erozja_queue, self(), Data, Msg}
+	end, Clients).

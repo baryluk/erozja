@@ -1,7 +1,6 @@
 -module(erozja_gui).
 -author('baryluk@smp.if.uj.edu.pl').
 
-
 -include_lib("wx/include/wx.hrl").
 
 % we are using wxWidgets here
@@ -14,7 +13,7 @@
 -export([start/0, start_link/0, stop/0]).
 -export([init/1, terminate/2,  code_change/3, handle_info/2, handle_call/3, handle_event/2]).
 
--record(state, {win, tree, preview, adder}).
+-record(state, {win, tree, preview, adder, sb}).
 
 -define(deb_enable, 1).
 -include("erozja.hrl").
@@ -89,7 +88,7 @@ init(Options) ->
 
 	wxFrame:connect(Frame, command_menu_selected),
 
-	_SB = wxFrame:createStatusBar(Frame),
+	SB = wxFrame:createStatusBar(Frame),
 
 	MainPanel = wxPanel:new(Frame),
 
@@ -103,17 +102,17 @@ init(Options) ->
 	SubTree = wxTreeCtrl:addRoot(Tree, "Main", [{data, main}]),
 
 	Feeds = erozja_manager:list_feeds(),
-	lists:foreach(fun({URL, Pid}) ->
+	lists:foreach(fun({URL, QueuePid}) ->
 		Item = wxTreeCtrl:appendItem(Tree, SubTree, "URL"),
 		Data = Item,
-		AllStat = erozja_queue:subscribe(Pid, Data),
+		AllStat = erozja_queue:subscribe(QueuePid, Data),
 		{Title, Favicon, CountTotal, CountUnreaded, LastUpdate} = AllStat,
 		Title1 = if
 			CountUnreaded =:= 0 -> Title;
 			true -> Title ++ " (" ++ integer_to_list(CountUnreaded) ++ ")"
 		end,
 		wxTreeCtrl:setItemText(Tree, Item, Title1),
-		Data2 = {{URL, Pid}, AllStat},
+		Data2 = {{URL, QueuePid}, AllStat},
 		wxTreeCtrl:setItemData(Tree, Item, Data2),
 		if
 			CountUnreaded =/= 0 ->
@@ -155,12 +154,13 @@ init(Options) ->
 
 	wxTreeCtrl:connect(Tree, command_tree_item_activated),
 	wxTreeCtrl:connect(Tree, command_tree_sel_changed),
+	wxTreeCtrl:connect(Tree, command_right_click),
 
 	wxHtmlWindow:connect(Preview, command_html_link_clicked),
+	wxHtmlWindow:connect(Preview, command_left_click),
+	wxHtmlWindow:connect(Preview, command_right_click),
 
-	State = #state{win=Frame,tree=Tree,preview=Preview},
-
-	?deb("State = ~p~n", [State]),
+	State = #state{win=Frame,tree=Tree,preview=Preview,sb=SB},
 
 	wxToolTip:enable(true),
 	wxToolTip:setDelay(500),
@@ -176,8 +176,21 @@ handle_info({Adder, W}, State = #state{adder=Adder}) when is_pid(Adder) ->
 			ok
 	end,
 	{noreply, State#state{adder=undefined}};
-handle_info({erozja_queue, _From, Data, Msg}, State) ->
+handle_info({erozja_queue, _From, Data, Msg}, State = #state{sb=SB,tree=Tree}) ->
 %	?deb("msg from queue:~n  ~p~n", [Msg]),
+	case Msg of
+		{add_item, FeedItem} ->
+			ok;
+		{update_started, _LoaderPid} ->
+			TreeItemNum = Data,
+			FeedTitle = from_tree_title_or_url(TreeItemNum, Tree),
+			wxStatusBar:setStatusText(SB, "Update started for "++FeedTitle),
+			ok;
+		{update_done, _LoaderPid, Status} ->
+			TreeItemNum = Data,
+			FeedTitle = from_tree_title_or_url(TreeItemNum, Tree),
+			wxStatusBar:setStatusText(SB, "Update done for "++FeedTitle++" with status "++io_lib:format("~p", [Status]))
+	end,
 	{noreply, State};
 handle_info({'EXIT', _, wx_deleted}, State) ->
 	{noreply, State};
@@ -213,10 +226,7 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 		?wxID_EXIT ->
 			{stop, normal, State};
 		?wxID_NEW ->
-			Parent = self(),
-			Env = wx:get_env(),
-			AdderPid = spawn_link(fun() ->
-				wx:set_env(Env),
+			AdderPid = worker(fun(Parent) ->
 				String = "Enter URL of website to automatically detect available feeds or direct RSS feed address if you know it",
 				Dialog = wxTextEntryDialog:new(State#state.win, String,
 								[{style, ?wxOK bor ?wxCANCEL bor ?wxSTAY_ON_TOP},
@@ -255,25 +265,57 @@ handle_event(#wx{event=#wxClose{}}, State = #state{win=Frame}) ->
 
 handle_event(#wx{id = Id, event = #wxTree{type = command_tree_item_activated, item = ItemNum}}, State = #state{tree=Tree}) ->
 	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
-	?deb("  double click on item ~p ~n    with data ~p~n", [ItemNum, Data]),
+%	?deb("  double click on item ~p ~n    with data ~p~n", [ItemNum, Data]),
+	% something like forced update will be better,
+	% for internal nodes in tree, update whole subtree
 	wxTreeCtrl:setItemBold(Tree, ItemNum, [{bold, true}]),
 	{noreply, State};
 
-handle_event(#wx{id = Id, event = #wxTree{type = command_tree_sel_changed, item = ItemNum}}, State = #state{tree=Tree}) ->
+handle_event(#wx{id = Id, event = #wxTree{type = command_tree_sel_changed, item = ItemNum}}, State = #state{tree=Tree, preview=Preview, win=Frame}) ->
 	ItemNum = wxTreeCtrl:getSelection(Tree),
 	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
-	?deb("  selection on item ~p ~n    with data ~p~n", [ItemNum, Data]),
+	% show in Status Bar, number of items, URL, when lastly updated, and when will be next update, and status (ok/error) of last update
+%	?deb("  selection on item ~p ~n    with data ~p~n", [ItemNum, Data]),
+	case Data of
+		{{URL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+			_WorkerPid = worker(fun(_Parent) ->
+				Title = case FeedTitle of
+					undefined -> URL;
+					_ -> FeedTitle
+				end,
+				wxFrame:setTitle(Frame, Title ++ " - Erozja"),
+				wxHtmlWindow:setPage(Preview, "<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8'></head><body><h1>"++Title++"</h1><br/>"),
+				Items = erozja_queue:get_items(QueuePid),
+				lists:foldl(fun(Item = #rss_item{title=ItemTitle, desc=ItemDesc}, _) ->
+					wxHtmlWindow:appendToPage(Preview, "<h2>"++totext(ItemTitle)++"</h2><p>"++totext(ItemDesc)++"</p><br>")
+				end, [], Items),
+				wxHtmlWindow:appendToPage(Preview, "</body></html>")
+			end);
+		_ ->
+			ignore % probably internal node of tree, not leaf
+	end,
 	{noreply, State};
 
 	%wxTreeCtrl:selectItem(Tree, ItemNum)
 	%wxTreeCtrl:setItemData(Tree, ItemNumber, Data)
 
-
 handle_event(#wx{id = Id, event = #wxHtmlLink{type = command_html_link_clicked, linkInfo = LinkInfo}}, State = #state{}) ->
 	#wxHtmlLinkInfo{href = Href} = LinkInfo,
 	?deb("Clicked link ~p~n", [Href]),
+	% IMPORTANT TODO: sanitize Href!
 	spawn(fun() -> os:cmd("/usr/bin/sensible-browser '"++Href++"'") end),
 	{noreply, State};
+
+handle_event(#wx{id = Id, event = #wxCommand{type = command_left_click}}, State = #state{preview=Preview}) ->
+	Text = wxHtmlWindow:selectionToText(Preview),
+	?deb("Preview left clicked? text=~p~n", [Text]),
+	{nreply, State};
+
+handle_event(#wx{id = Id, event = #wxCommand{type = command_right_click}}, State = #state{preview=Preview}) ->
+	Text = wxHtmlWindow:selectionToText(Preview),
+	?deb("Preview right clicked? text=~p~n", [Text]),
+	{nreply, State};
+
 
 handle_event(Ev, State) ->
 	?deb("Unknown event ~p~n", [Ev]),
@@ -284,3 +326,38 @@ code_change(_, _, State) ->
 
 terminate(_Reason, _State) ->
 	wx:destroy().
+
+
+worker(Fun) ->
+	Parent = self(),
+	Env = wx:get_env(),
+	Pid = spawn_link(fun() ->
+		wx:set_env(Env),
+		Fun(Parent)
+	end),
+	Pid.
+
+
+totext(undefined) ->
+	"";
+totext(L) when is_list(L) ->
+	L.
+
+from_tree_title(ItemNum, Tree) ->
+	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
+	case Data of
+		{{URL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+			FeedTitle;
+		_ -> undefined
+	end.
+
+from_tree_title_or_url(ItemNum, Tree) ->
+	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
+	case Data of
+		{{URL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+			case FeedTitle of
+				undefined -> URL;
+				_ -> FeedTitle
+			end;
+		_ -> undefined
+	end.
