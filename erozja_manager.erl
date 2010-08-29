@@ -43,7 +43,7 @@ handle_call({add_feed, URL}, _From, State = #state{feeds=Feeds}) ->
 	{ok, QueuePid} = erozja_queues_sup:start_child(URL),
 	NewFeed = {URL, QueuePid},
 	NewState = State#state{feeds = [NewFeed | Feeds]},
-	Result = ok,
+	Result = {ok, QueuePid},
 	{reply, Result, NewState};
 
 handle_call(list_feeds, _From, State = #state{feeds=Feeds}) ->
