@@ -4,7 +4,7 @@
 
 -behaviour(gen_server).
 
--export([start/0, start_link/0, start/1, start_link/1, stop/1, add_item/2, get_items/1,
+-export([start/0, start_link/0, start/1, start_link/1, stop/1, add_item/2, loader_done/2, get_items/1,
 	stop_update/1, force_update/1, set_options/2, last_update/1, subscribe/2]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -50,6 +50,9 @@ last_update(Pid) ->
 % this is called by loader or subqueues
 add_item(Pid, Item) ->
 	gen_server:cast(Pid, {add_item, Item}).
+
+loader_done(Pid, Status) ->
+	gen_server:cast(Pid, {loader_done, self(), Status}).
 
 subscribe(Pid, Data) ->
 	Self = self(),
@@ -107,17 +110,22 @@ handle_cast({add_item, Item}, State = #state{subscribed_by = Clients}) ->
 	State1 = add(Item, State),
 	notify({add_item, Item}, Clients),
 	{noreply, State1};
+handle_cast({loader_done, LoaderPid, Status}, State = #state{subscribed_by = Clients, loader_pid=LoaderPid}) ->
+	notify({update_done, LoaderPid, Status}, Clients),
+	{noreply, State};
 handle_cast(stop, State) ->
 	{stop, stop, State};
 handle_cast(Unknown, State) ->
 	?deb("Unknown cast ~p~n", [Unknown]),
 	{noreply, State}.
 
-start_update(State = #state{url=URL,loader_pid=undefined, subscribed_by = Clients}) ->
+start_update(State = #state{url=URL, loader_pid=undefined, subscribed_by = Clients}) ->
 	{LoaderPid, LoaderMonitor} = spawn_monitor(erozja_loader, url, [URL, self()]),
+	?deb("Update for ~p started.~n", [URL]),
 	notify({update_started, LoaderPid}, Clients),
 	State#state{loader_pid=LoaderPid, loader_monitor=LoaderMonitor};
-start_update(State = #state{url=_URL,loader_pid=OldLoader}) when is_pid(OldLoader) ->
+start_update(State = #state{url=URL,loader_pid=OldLoader}) when is_pid(OldLoader) ->
+	?deb("Update for ~p already in progress.~n", [URL]),
 	State.
 
 
@@ -128,18 +136,20 @@ handle_info(update_by_timer, State0) ->
 handle_info({'DOWN', MonitorRef, process, LoaderPid, Reason}, State1 = #state{loader_pid = LoaderPid, loader_monitor=MonitorRef, url=URL, subscribed_by = Clients}) ->
 	case Reason of
 		normal ->
-			notify({update_done, LoaderPid, ok}, Clients),
+			% normal not nacassarly mean, that it is done without error
+			NewItemsCount = 0,
+			notify({update_done, LoaderPid, {ok, NewItemsCount}}, Clients),
 			ok;
 		_ ->
-			notify({update_done, LoaderPid, error}, Clients),
-			io:format("~p:~p: Loader ~p for ~p down:~n Reason ~p~n", [?MODULE, self(), LoaderPid, URL, Reason]),
+			notify({update_done, LoaderPid, Reason}, Clients),
+			?deb("Loader ~p for ~p down:~n Reason ~p~n", [LoaderPid, URL, Reason]),
 			ok
 	end,
 	State2 = set_timer(State1),
 	State3 = State2#state{loader_pid=undefined, loader_monitor=undefined},
 	{noreply, State3};
 handle_info({'DOWN', _MonitorRef, process, Pid, Reason}, State1 = #state{subscribed_by = Clients, url = URL}) ->
-	io:format("~p:~p: Subscriber ~p for ~p down:~n Reason ~p~n", [?MODULE, self(), Pid, URL, Reason]),
+	?deb("Subscriber ~p for ~p down:~n Reason ~p~n", [Pid, URL, Reason]),
 	NewClients = proplists:delete(Pid, Clients),
 	State2 = State1#state{subscribed_by = NewClients},
 	{noreply, State2};
