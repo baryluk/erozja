@@ -13,8 +13,7 @@
 -ifdef(deb_enable).
 -define(deb(Format, Fields),
    begin
-      io:format("~p ~p.erl:~p~n   ", [self(), ?MODULE, ?LINE]),
-      io:format(Format, Fields)
+      io:format("~p ~p.erl:~p~n " ++ Format, [self(), ?MODULE, ?LINE | Fields])
    end).
 -else.
 -define(deb(Format, Fields),
