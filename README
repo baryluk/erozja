@@ -1,7 +1,36 @@
-Simple RSS feed reader with GUI, but also RSS agregator which
+==== Erozja ===
+
+Erozja is a simple RSS feed reader with GUI, but also RSS agregator which
 can be used by other as server, for other clients.
 
-Alpha version. Not for usage yet.
+This is Alpha quality software. Not for real usage yet.
+See http://wiki.github.com/baryluk/erozja/ for current status and some screenshots.
 
+It is written in Erlang, uses wxWidgets, and works on Linux.
+
+It will be light-weight client/server, which hopefully will scale nicely
+to big number of feeds and entries, without any observable CPU load
+or GUI latency increase. We target into 200 feeds each with 100 entries
+in single GUI instance.
+
+
+
+
+== TODO ==
+  * Better Atom parser
+  * RDF parser
+  * Digg parser (stories/story)
+  * Fetch icons for feeds
+  * Discover feed names (for Atom simple, for RSS can be harder), and propagate it to subscribers
+  * Persistence of setup, feeds, entries(items)
+  * Make display more configurable (implement 3 pane view, off/on description)
+  * Tooltip when hovering over each tree item with informations like (last update, total itmes, unreaded items, last update status)
+  * Implement “item unreaded” flag
+  * Implement filtering based on unreaded flag
+  * Refresh preview if currently viewed feed have new items
+  * HTTP Proxy support
+  * Aggregate subscribed feeds using inets http server, to be used in other clients.
+
+== RELEATE WORKS ==
 
 See also http://www.cs.caltech.edu/courses/cs11/material/erlang/lab3/index.html
