@@ -13,7 +13,9 @@
 -export([start/0, start_link/0, stop/0]).
 -export([init/1, terminate/2,  code_change/3, handle_info/2, handle_call/3, handle_event/2]).
 
--record(state, {win, tree, preview, adder, sb}).
+-record(state, {win, tree, subtree, preview, adder, sb}).
+
+-record(data, {url, pid, stats, last_status}).
 
 -define(deb_enable, 1).
 -include("erozja.hrl").
@@ -50,7 +52,7 @@ init(Options) ->
 	wxMenu:append(Sub, 10001, "Update all subscription", [{help, "Fetch all subscriped RSS feeds from Internet, and update any new items"}]),
 	wxMenu:appendSeparator(Sub),
 	wxMenu:append(Sub, ?wxID_NEW, "New subscription...", [{help, "Add new RSS feed to the Erozja reader"}]),
-	wxMenu:append(Sub, 10002, "New folder..."),
+	wxMenu:append(Sub, 10002, "New folder...", [{help, "Create new folder, in which you can place feeds or other folders, to organize your feeds into tree hierarchy"}]),
 	wxMenu:append(Sub, 10003, "New source...", [{help, "Add meta-sources like Planets/Blogrolls, live OMPL file, Google Reader account or Bloglines account"}]),
 	wxMenu:appendSeparator(Sub),
 	wxMenu:append(Sub, 10004, "Import subscriptions...", [{help, "Read subscriptions from OMPL file"}]),
@@ -67,9 +69,9 @@ init(Options) ->
 	wxMenu:appendSeparator(View),
 	wxMenu:appendCheckItem(View, 10013, "Reduced tree view", [{help, "Show only this tree items, which have unreaded entries"}]),
 	wxMenu:appendSeparator(View),
+	wxMenu:appendRadioItem(View, 10016, "Condensated view", [{help, "Single panel: Rendered as list with both headers (title, date), and content. Status rendered using background"}]),
 	wxMenu:appendRadioItem(View, 10014, "Normal view", [{help, "Two panels: list of entries (title, date, status) on top, and entry view at bottom"}]),
 	wxMenu:appendRadioItem(View, 10015, "Wide view", [{help, "Two panels: list of entries (title, date, status) on left, and entry view at right - good for wide screens"}]),
-	wxMenu:appendRadioItem(View, 10016, "Condensated view", [{help, "Single panel: Rendered as list with both headers (title, date), and content. Status rendered using background"}]),
 	wxMenu:appendRadioItem(View, 10017, "List view", [{help, "Single panel: Show only list (title, date, status), like in the Normal view, but without entry view"}]),
 	wxMenu:appendRadioItem(View, 10018, "Deep tree view", [{help, "Single panel: Show only tree (title, date, status), similar like in the Normal view, but now it is a tree of all feeds"}]),
 	wxMenu:appendSeparator(View),
@@ -103,26 +105,7 @@ init(Options) ->
 
 	Feeds = erozja_manager:list_feeds(),
 	lists:foreach(fun({URL, QueuePid}) ->
-		TreeItemNum = wxTreeCtrl:appendItem(Tree, SubTree, "URL"),
-		Data = TreeItemNum,
-		AllStat = erozja_queue:subscribe(QueuePid, Data),
-		{Title, Favicon, CountTotal, CountUnreaded, LastUpdate} = AllStat,
-		Title1 = if
-			CountUnreaded =:= 0 -> Title;
-			true -> Title ++ " (" ++ integer_to_list(CountUnreaded) ++ ")"
-		end,
-		wxTreeCtrl:setItemText(Tree, TreeItemNum, Title1),
-		Data2 = {{URL, QueuePid}, AllStat},
-		wxTreeCtrl:setItemData(Tree, TreeItemNum, Data2),
-		if
-			CountUnreaded =/= 0 ->
-				wxTreeCtrl:setItemBold(Tree, TreeItemNum);
-			true ->
-				ok
-		end,
-		Img1 = wxImage:new("icon1.png"),
-		%wxTreeCtrl:setItemImage(Tree, TreeItemNum, Img1),
-		ok
+		add_to_tree(Tree, SubTree, {URL, QueuePid})
 	end, Feeds),
 	wxTreeCtrl:expand(Tree, SubTree),
 
@@ -165,18 +148,43 @@ init(Options) ->
 	wxHtmlWindow:connect(Preview, command_left_click),
 	wxHtmlWindow:connect(Preview, command_right_click),
 
-	State = #state{win=Frame,tree=Tree,preview=Preview,sb=SB},
+	State = #state{win=Frame,tree=Tree,subtree=SubTree,preview=Preview,sb=SB},
 
 	wxToolTip:enable(true),
 	wxToolTip:setDelay(500),
 
 	{Frame, State#state{}}.
 
+add_to_tree(Tree, SubTree, {URL, QueuePid}) ->
+	TreeItemNum = wxTreeCtrl:appendItem(Tree, SubTree, "URL"),
+	Data = TreeItemNum,
+	AllStat = erozja_queue:subscribe(QueuePid, Data),
+	{Title, Favicon, CountTotal, CountUnreaded, LastUpdate} = AllStat,
+	Title1 = if
+		CountUnreaded =:= 0 -> Title;
+		true -> Title ++ " (" ++ integer_to_list(CountUnreaded) ++ ")"
+	end,
+	wxTreeCtrl:setItemText(Tree, TreeItemNum, Title1),
+	Data2 = {{URL, QueuePid}, AllStat, ""},
+	wxTreeCtrl:setItemData(Tree, TreeItemNum, Data2),
+	if
+		CountUnreaded =/= 0 ->
+			wxTreeCtrl:setItemBold(Tree, TreeItemNum);
+		true ->
+			ok
+	end,
+	Img1 = wxImage:new("icon1.png"),
+	%wxTreeCtrl:setItemImage(Tree, TreeItemNum, Img1),
+	ok.
+
 %% Handled as in normal gen_server callbacks
-handle_info({Adder, W}, State = #state{adder=Adder}) when is_pid(Adder) ->
+handle_info({Adder, W}, State = #state{adder=Adder,tree=Tree,subtree=SubTree}) when is_pid(Adder) ->
 	case W of
 		{add, URL} ->
-			erozja_manager:add_feed(URL);
+			case erozja_manager:add_feed(URL) of
+				{ok, QueuePid} ->
+					add_to_tree(Tree, SubTree, {URL, QueuePid})
+			end;
 		cancel ->
 			ok
 	end,
@@ -184,7 +192,7 @@ handle_info({Adder, W}, State = #state{adder=Adder}) when is_pid(Adder) ->
 handle_info({erozja_queue, _From, Data, Msg}, State = #state{sb=SB,tree=Tree}) ->
 %	?deb("msg from queue:~n  ~p~n", [Msg]),
 	case Msg of
-		{add_item, FeedItem} ->
+		{new_item, FeedItem} ->
 			ok;
 		{update_started, _LoaderPid} ->
 			TreeItemNum = Data,
@@ -192,17 +200,20 @@ handle_info({erozja_queue, _From, Data, Msg}, State = #state{sb=SB,tree=Tree}) -
 			wxTreeCtrl:setItemBold(Tree, TreeItemNum, [{bold, true}]),
 			wxStatusBar:setStatusText(SB, "Update started for "++FeedTitle),
 			ok;
-		{update_done, _LoaderPid, Status} ->
+		{update_done, _LoaderPid, Diff, Status} ->
 			TreeItemNum = Data,
 			FeedTitle = from_tree_title_or_url(TreeItemNum, Tree),
 			wxTreeCtrl:setItemBold(Tree, TreeItemNum, [{bold, false}]),
 			case Status of
 				{ok, _} ->
-					wxTreeCtrl:setItemTextColour(Tree, TreeItemNum, {0,0,0});
+					wxTreeCtrl:setItemTextColour(Tree, TreeItemNum, {255,255,255});
 				_ ->
 					wxTreeCtrl:setItemTextColour(Tree, TreeItemNum, {255,0,0})
 			end,
-			wxStatusBar:setStatusText(SB, "Update done for "++FeedTitle++" with status "++io_lib:format("~p", [Status]))
+			wxStatusBar:setStatusText(SB, "Update done for "++FeedTitle++" with status "++lists:flatten(io_lib:fwrite("~10000p", [Status]))++" after "++integer_to_list(Diff)++"ms"),
+			% save/update status of last update in treeitem data
+			% 
+			ok
 	end,
 	{noreply, State};
 handle_info({'EXIT', _, wx_deleted}, State) ->
@@ -289,23 +300,36 @@ handle_event(#wx{id = _Id, event = #wxTree{type = command_tree_sel_changed, item
 	% show in Status Bar, number of items, URL, when lastly updated, and when will be next update, and status (ok/error) of last update
 %	?deb("  selection on item ~p ~n    with data ~p~n", [ItemNum, Data]),
 	case Data of
-		{{FeedURL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+		{{FeedURL, QueuePid}, {_, FeedTitle, _, _, _}, _} ->
 			_WorkerPid = worker(fun(_Parent) ->
 				Title = case FeedTitle of
 					undefined -> FeedURL;
 					_ -> FeedTitle
 				end,
 				wxFrame:setTitle(Frame, Title ++ " - Erozja"),
-				wxHtmlWindow:setPage(Preview, "<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8'></head><body><h2><a href='"++FeedURL++"'>"++Title++"</a></h2><br/>"),
+				wxHtmlWindow:setPage(Preview, ["<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8'></head><body><h2><a href='",FeedURL,"'>",Title,"</a></h2><br/>"]),
+				wxHtmlWindow:appendToPage(Preview, "<ul>"),
+				ShowDesc = false,
 				Items = erozja_queue:get_items(QueuePid),
-				lists:foldl(fun(Item = #rss_item{title=ItemTitle, desc=ItemDesc, link=ItemURL, pubdate=ItemPubDate}, C) ->
+				{_, Content0} = wx:foldl(fun(Item = #rss_item{title=ItemTitle, desc=ItemDesc, link=ItemURL, pubdate=ItemPubDate, author=ItemAuthor}, {C, Acc}) ->
 					if
-					  C < 10 ->
-					    wxHtmlWindow:appendToPage(Preview, "<hr><h4><a href='"++totext(ItemURL)++"'>"++totext(ItemTitle)++"</a></h4><div>"++datetotext(ItemPubDate)++"</div><div>"++totext(ItemDesc)++"</div>");
-					  true -> ok
-					end,
-					C+1
-				end, 0, Items),
+					  C < 100 ->
+					    %Text = ["<h5><a href='",totext(ItemURL),"'>",totext(ItemTitle),"</a></h5><div>at ",datetotext(ItemPubDate)," by ",totext(ItemAuthor),"</div><div>",totext(ItemDesc),"</div>"];
+					    Text = ["<li><a href='",totext(ItemURL),"'>"
+					    	,totext(ItemTitle),"</a>"
+					    	,case ItemPubDate of undefined -> ""; _ -> [" submitted ",datetotext(ItemPubDate)] end
+					    	,case ItemAuthor of undefined -> ""; _ -> [" by ",totext(ItemAuthor)] end
+					    	,if ShowDesc -> [" <div>",totext(ItemDesc),"</div>"]; true -> "" end
+					    	,"</li>"
+					    	],
+					    %wxHtmlWindow:appendToPage(Preview, Text),
+					    {C+1, [Text | Acc]};
+					  true -> {C+1, Acc}
+					end
+				end, {0, []}, Items),
+				Content = lists:reverse(Content0),
+				wxHtmlWindow:appendToPage(Preview, ["<ul>",Content,"</ul>"]),
+				%wxHtmlWindow:appendToPage(Preview, "</ul>"),
 				wxHtmlWindow:appendToPage(Preview, "</body></html>")
 			end);
 		_ ->
@@ -358,17 +382,23 @@ worker(Fun) ->
 totext(undefined) ->
 	"";
 totext(L) when is_list(L) ->
-	L.
+	L;
+totext(B) when is_binary(B) ->
+	B.
 
-datetotext(Timestamp) ->
+datetotext(undefined) ->
+	"";
+datetotext(Timestamp) when is_integer(Timestamp), Timestamp > 0 ->
 	DT = calendar:gregorian_seconds_to_datetime(Timestamp),
-	io_lib:format("~p", [DT]).
+	io_lib:format("~p", [DT]);
+datetotext(Timestamp) ->
+	"?DATE_PARSING_ERROR".
 
 % gets title for given tree item or undefined
 from_tree_title(TreeItemNum, Tree) ->
 	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
 	case Data of
-		{{_URL, _QueuePid}, {_, FeedTitle, _, _, _}} ->
+		{{_URL, _QueuePid}, {_, FeedTitle, _, _, _}, _} ->
 			FeedTitle;
 		_ -> undefined
 	end.
@@ -377,7 +407,7 @@ from_tree_title(TreeItemNum, Tree) ->
 from_tree_title_or_url(TreeItemNum, Tree) ->
 	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
 	case Data of
-		{{URL, _QueuePid}, {_, FeedTitle, _, _, _}} ->
+		{{URL, _QueuePid}, {_, FeedTitle, _, _, _}, _} ->
 			case FeedTitle of
 				undefined -> URL;
 				_ -> FeedTitle
@@ -389,7 +419,7 @@ from_tree_title_or_url(TreeItemNum, Tree) ->
 from_tree_queuepid(TreeItemNum, Tree) ->
 	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
 	case Data of
-		{{_URL, QueuePid}, {_, _FeedTitle, _, _, _}} ->
+		{{_URL, QueuePid}, {_, _FeedTitle, _, _, _}, _} ->
 			QueuePid;
 		_ -> undefined
 	end.
