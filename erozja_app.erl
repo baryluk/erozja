@@ -23,5 +23,5 @@ go() ->
 	application:start(wx),
 	application:start(erozja),
 	erozja_ompl:start_testrss(),
-	erozja_gui:start().
+	erozja_gui_wx:start().
 
