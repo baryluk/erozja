@@ -114,7 +114,7 @@ init(Options) ->
 	Preview = wxHtmlWindow:new(RightPanel, [{style, ?wxHW_SCROLLBAR_AUTO}]),
 	%wxTreeCtrl:setMinSize(Preview, {400, -1}),
 
-	wxHtmlWindow:setPage(Preview, "Erozja preview window! Select feed on left to show all entries for given feed."),
+	wxHtmlWindow:setPage(Preview, "Erozja preview window! Select feed on left to show all entries for given feed. You can double click on tree elements to force update of given feed (or all subfeeds). When updating tree items are show in bold. Red color indicate there was some kind of error."),
 
 	Vbox = wxBoxSizer:new(?wxVERTICAL),
 	wxSizer:add(Vbox, Tree, [{flag, ?wxEXPAND}, {proportion, 1}]),
