@@ -10,14 +10,18 @@
 
 url(URL) ->
 	?deb("starting request to~n", [URL]),
+	% TODO: ask manager to if we can start (to limit number of concurrant connections)
+	
 	FetchResult = httpc:request(get, {URL, []}, [{timeout, 60000}, {connect_timeout, 30000}], [{body_format, binary}]),
 	try FetchResult of
 		{ok, {{_, 200, _}, _Headers, Body}} ->
 			?deb("ended request to~n", [URL]),
 			ParingResult = erozja_parse:string(Body),
 			ParingResult;
-		{error, timeout} ->
-			{error, timeout}
+		E = {error, timeout} ->
+			E;
+		E = {error, {connect_failed, nxdomain}} ->
+			E
 	catch
 		error:E ->
 			{error, E}
@@ -30,7 +34,10 @@ url(URL, ParentQueue) ->
 			lists:foreach(fun(Item) ->
 				erozja_queue:add_item(ParentQueue, Item)
 			end, Items),
+			%erozja_queue:loader_done(ParentQueue, ok),
 			ok;
 		Other ->
-			Other
-	end.
+			%erozja_queue:loader_done(ParentQueue, Other)
+			exit(Other) % this will be send using monitor nicely
+	end,
+	ok.
