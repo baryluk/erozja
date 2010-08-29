@@ -7,6 +7,7 @@
 	desc,     % string().
 	guid,     % string().
 	fetched,  % integer(). % unix timestamp
+	author,   % string().
 	source    % atom(). % name of process
 }).
 
