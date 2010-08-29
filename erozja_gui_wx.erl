@@ -97,56 +97,61 @@ init(Options) ->
 	LeftPanel = wxPanel:new(Splitter),
 
 	Tree = wxTreeCtrl:new(LeftPanel),
-	wxTreeCtrl:setMinSize(Tree, {200, -1}),
+	%wxTreeCtrl:setMinSize(Tree, {200, -1}),
 
 	SubTree = wxTreeCtrl:addRoot(Tree, "Main", [{data, main}]),
 
 	Feeds = erozja_manager:list_feeds(),
 	lists:foreach(fun({URL, QueuePid}) ->
-		Item = wxTreeCtrl:appendItem(Tree, SubTree, "URL"),
-		Data = Item,
+		TreeItemNum = wxTreeCtrl:appendItem(Tree, SubTree, "URL"),
+		Data = TreeItemNum,
 		AllStat = erozja_queue:subscribe(QueuePid, Data),
 		{Title, Favicon, CountTotal, CountUnreaded, LastUpdate} = AllStat,
 		Title1 = if
 			CountUnreaded =:= 0 -> Title;
 			true -> Title ++ " (" ++ integer_to_list(CountUnreaded) ++ ")"
 		end,
-		wxTreeCtrl:setItemText(Tree, Item, Title1),
+		wxTreeCtrl:setItemText(Tree, TreeItemNum, Title1),
 		Data2 = {{URL, QueuePid}, AllStat},
-		wxTreeCtrl:setItemData(Tree, Item, Data2),
+		wxTreeCtrl:setItemData(Tree, TreeItemNum, Data2),
 		if
 			CountUnreaded =/= 0 ->
-				wxTreeCtrl:setItemBold(Tree, Item);
+				wxTreeCtrl:setItemBold(Tree, TreeItemNum);
 			true ->
 				ok
-		end
+		end,
+		Img1 = wxImage:new("icon1.png"),
+		%wxTreeCtrl:setItemImage(Tree, TreeItemNum, Img1),
+		ok
 	end, Feeds),
 	wxTreeCtrl:expand(Tree, SubTree),
 
 	RightPanel = wxPanel:new(Splitter),
 
 	Preview = wxHtmlWindow:new(RightPanel, [{style, ?wxHW_SCROLLBAR_AUTO}]),
-	wxTreeCtrl:setMinSize(Preview, {400, -1}),
+	%wxTreeCtrl:setMinSize(Preview, {400, -1}),
 
 	wxHtmlWindow:setPage(Preview, "Erozja preview window! Select feed on left to show all entries for given feed."),
 
-	Vbox = wxBoxSizer:new(?wxHORIZONTAL),
-	wxSizer:add(Vbox, Tree, [{flag, ?wxEXPAND}]),
+	Vbox = wxBoxSizer:new(?wxVERTICAL),
+	wxSizer:add(Vbox, Tree, [{flag, ?wxEXPAND}, {proportion, 1}]),
 	wxPanel:setSizer(LeftPanel, Vbox),
 
 	Vbox2 = wxBoxSizer:new(?wxHORIZONTAL),
-	wxSizer:add(Vbox2, Preview, [{flag, ?wxEXPAND}]),
+	wxSizer:add(Vbox2, Preview, [{flag, ?wxEXPAND}, {proportion, 1}]),
 	wxPanel:setSizer(RightPanel, Vbox2),
 
 	wxSplitterWindow:splitVertically(Splitter, LeftPanel, RightPanel, [{sashPosition, 150}]),
-	wxSplitterWindow:setMinimumPaneSize(Splitter, 200),
+	wxSplitterWindow:setMinimumPaneSize(Splitter, 150),
 
-	MainSizer = wxBoxSizer:new(?wxHORIZONTAL),
+	wxSplitterWindow:setSashGravity(Splitter, 0.1),
+
+	MainSizer = wxBoxSizer:new(?wxVERTICAL),
 
 	%wxSizer:add(MainSizer, Tree, [{flag, ?wxALL bor ?wxEXPAND}]),
 	%wxSizer:add(MainSizer, Preview, [{flag, ?wxALL bor ?wxEXPAND}]),
 
-	wxSizer:add(MainSizer, Splitter, [{flag, ?wxEXPAND}]),
+	wxSizer:add(MainSizer, Splitter, [{flag, ?wxEXPAND}, {proportion, 1}]),
 
 	wxPanel:setSizer(MainPanel, MainSizer),
 
@@ -184,11 +189,19 @@ handle_info({erozja_queue, _From, Data, Msg}, State = #state{sb=SB,tree=Tree}) -
 		{update_started, _LoaderPid} ->
 			TreeItemNum = Data,
 			FeedTitle = from_tree_title_or_url(TreeItemNum, Tree),
+			wxTreeCtrl:setItemBold(Tree, TreeItemNum, [{bold, true}]),
 			wxStatusBar:setStatusText(SB, "Update started for "++FeedTitle),
 			ok;
 		{update_done, _LoaderPid, Status} ->
 			TreeItemNum = Data,
 			FeedTitle = from_tree_title_or_url(TreeItemNum, Tree),
+			wxTreeCtrl:setItemBold(Tree, TreeItemNum, [{bold, false}]),
+			case Status of
+				{ok, _} ->
+					wxTreeCtrl:setItemTextColour(Tree, TreeItemNum, {0,0,0});
+				_ ->
+					wxTreeCtrl:setItemTextColour(Tree, TreeItemNum, {255,0,0})
+			end,
 			wxStatusBar:setStatusText(SB, "Update done for "++FeedTitle++" with status "++io_lib:format("~p", [Status]))
 	end,
 	{noreply, State};
@@ -249,6 +262,9 @@ handle_event(#wx{id = Id, event = #wxCommand{type = command_menu_selected}}, Sta
 				R(R, "")
 			end),
 			{noreply, State#state{adder=AdderPid}};
+		10001 ->
+			erozja_manager:force_update_all(),
+			{noreply, State};
 		10002 -> % new folder
 			{noreply, State};
 		10004 -> % import ompl
@@ -263,32 +279,33 @@ handle_event(#wx{event=#wxClose{}}, State = #state{win=Frame}) ->
 	ok = wxFrame:setStatusText(Frame, "Closing...", []),
 	{stop, normal, State};
 
-handle_event(#wx{id = Id, event = #wxTree{type = command_tree_item_activated, item = ItemNum}}, State = #state{tree=Tree}) ->
-	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
-%	?deb("  double click on item ~p ~n    with data ~p~n", [ItemNum, Data]),
-	% something like forced update will be better,
-	% for internal nodes in tree, update whole subtree
-	wxTreeCtrl:setItemBold(Tree, ItemNum, [{bold, true}]),
+handle_event(#wx{id = _Id, event = #wxTree{type = command_tree_item_activated, item = TreeItemNum}}, State = #state{tree=Tree}) ->
+	maybe_update(TreeItemNum, Tree),
 	{noreply, State};
 
-handle_event(#wx{id = Id, event = #wxTree{type = command_tree_sel_changed, item = ItemNum}}, State = #state{tree=Tree, preview=Preview, win=Frame}) ->
-	ItemNum = wxTreeCtrl:getSelection(Tree),
-	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
+handle_event(#wx{id = _Id, event = #wxTree{type = command_tree_sel_changed, item = TreeItemNum}}, State = #state{tree=Tree, preview=Preview, win=Frame}) ->
+	%TreeItemNum = wxTreeCtrl:getSelection(Tree),
+	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
 	% show in Status Bar, number of items, URL, when lastly updated, and when will be next update, and status (ok/error) of last update
 %	?deb("  selection on item ~p ~n    with data ~p~n", [ItemNum, Data]),
 	case Data of
-		{{URL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+		{{FeedURL, QueuePid}, {_, FeedTitle, _, _, _}} ->
 			_WorkerPid = worker(fun(_Parent) ->
 				Title = case FeedTitle of
-					undefined -> URL;
+					undefined -> FeedURL;
 					_ -> FeedTitle
 				end,
 				wxFrame:setTitle(Frame, Title ++ " - Erozja"),
-				wxHtmlWindow:setPage(Preview, "<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8'></head><body><h1>"++Title++"</h1><br/>"),
+				wxHtmlWindow:setPage(Preview, "<html><head><meta http-equiv='Content-Type' content='text/html; charset=UTF-8'></head><body><h2><a href='"++FeedURL++"'>"++Title++"</a></h2><br/>"),
 				Items = erozja_queue:get_items(QueuePid),
-				lists:foldl(fun(Item = #rss_item{title=ItemTitle, desc=ItemDesc}, _) ->
-					wxHtmlWindow:appendToPage(Preview, "<h2>"++totext(ItemTitle)++"</h2><p>"++totext(ItemDesc)++"</p><br>")
-				end, [], Items),
+				lists:foldl(fun(Item = #rss_item{title=ItemTitle, desc=ItemDesc, link=ItemURL, pubdate=ItemPubDate}, C) ->
+					if
+					  C < 10 ->
+					    wxHtmlWindow:appendToPage(Preview, "<hr><h4><a href='"++totext(ItemURL)++"'>"++totext(ItemTitle)++"</a></h4><div>"++datetotext(ItemPubDate)++"</div><div>"++totext(ItemDesc)++"</div>");
+					  true -> ok
+					end,
+					C+1
+				end, 0, Items),
 				wxHtmlWindow:appendToPage(Preview, "</body></html>")
 			end);
 		_ ->
@@ -299,22 +316,22 @@ handle_event(#wx{id = Id, event = #wxTree{type = command_tree_sel_changed, item 
 	%wxTreeCtrl:selectItem(Tree, ItemNum)
 	%wxTreeCtrl:setItemData(Tree, ItemNumber, Data)
 
-handle_event(#wx{id = Id, event = #wxHtmlLink{type = command_html_link_clicked, linkInfo = LinkInfo}}, State = #state{}) ->
+handle_event(#wx{id = _Id, event = #wxHtmlLink{type = command_html_link_clicked, linkInfo = LinkInfo}}, State = #state{}) ->
 	#wxHtmlLinkInfo{href = Href} = LinkInfo,
 	?deb("Clicked link ~p~n", [Href]),
 	% IMPORTANT TODO: sanitize Href!
 	spawn(fun() -> os:cmd("/usr/bin/sensible-browser '"++Href++"'") end),
 	{noreply, State};
 
-handle_event(#wx{id = Id, event = #wxCommand{type = command_left_click}}, State = #state{preview=Preview}) ->
+handle_event(#wx{id = _Id, event = #wxCommand{type = command_left_click}}, State = #state{preview=Preview}) ->
 	Text = wxHtmlWindow:selectionToText(Preview),
 	?deb("Preview left clicked? text=~p~n", [Text]),
-	{nreply, State};
+	{noreply, State};
 
-handle_event(#wx{id = Id, event = #wxCommand{type = command_right_click}}, State = #state{preview=Preview}) ->
+handle_event(#wx{id = _Id, event = #wxCommand{type = command_right_click}}, State = #state{preview=Preview}) ->
 	Text = wxHtmlWindow:selectionToText(Preview),
 	?deb("Preview right clicked? text=~p~n", [Text]),
-	{nreply, State};
+	{noreply, State};
 
 
 handle_event(Ev, State) ->
@@ -343,21 +360,58 @@ totext(undefined) ->
 totext(L) when is_list(L) ->
 	L.
 
-from_tree_title(ItemNum, Tree) ->
-	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
+datetotext(Timestamp) ->
+	DT = calendar:gregorian_seconds_to_datetime(Timestamp),
+	io_lib:format("~p", [DT]).
+
+% gets title for given tree item or undefined
+from_tree_title(TreeItemNum, Tree) ->
+	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
 	case Data of
-		{{URL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+		{{_URL, _QueuePid}, {_, FeedTitle, _, _, _}} ->
 			FeedTitle;
 		_ -> undefined
 	end.
 
-from_tree_title_or_url(ItemNum, Tree) ->
-	Data = wxTreeCtrl:getItemData(Tree, ItemNum),
+% gets title or url for given tree item or undefined
+from_tree_title_or_url(TreeItemNum, Tree) ->
+	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
 	case Data of
-		{{URL, QueuePid}, {_, FeedTitle, _, _, _}} ->
+		{{URL, _QueuePid}, {_, FeedTitle, _, _, _}} ->
 			case FeedTitle of
 				undefined -> URL;
 				_ -> FeedTitle
 			end;
 		_ -> undefined
+	end.
+
+% gets queue pid for given tree item or undefined
+from_tree_queuepid(TreeItemNum, Tree) ->
+	Data = wxTreeCtrl:getItemData(Tree, TreeItemNum),
+	case Data of
+		{{_URL, QueuePid}, {_, _FeedTitle, _, _, _}} ->
+			QueuePid;
+		_ -> undefined
+	end.
+
+% updates all feeds for given tree item (possibly recursivly)
+maybe_update(TreeItemNum, Tree) ->
+	case from_tree_queuepid(TreeItemNum, Tree) of
+		QueuePid when is_pid(QueuePid) ->
+			erozja_queue:force_update(QueuePid);
+		_ ->
+			case wxTreeCtrl:itemHasChildren(Tree, TreeItemNum) of
+				true ->
+					Count = wxTreeCtrl:getChildrenCount(Tree, TreeItemNum),
+					{TreeItemNum2, Cookie2} = wxTreeCtrl:getFirstChild(Tree, TreeItemNum),
+					maybe_update(TreeItemNum2, Tree),
+					lists:foldl(fun(_, {PrevTreeItemNum, PrevCookie}) ->
+						R = wxTreeCtrl:getNextChild(Tree, TreeItemNum, PrevCookie),
+						{TreeItemNum3, Cookie3} = R,
+						maybe_update(TreeItemNum3, Tree),
+						R
+					end, {TreeItemNum2, Cookie2}, lists:seq(1, Count-1));
+				false ->
+					ok
+			end
 	end.
