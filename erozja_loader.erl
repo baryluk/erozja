@@ -8,10 +8,20 @@
 
 % TODO: check if we are not in offline mode
 
-url(URL) ->
+url(URL = "http://" ++ _) ->
+	url_real(URL);
+url(URL = "https://" ++ _) ->
+	url_real(URL);
+url("file://" ++ FileName) ->
+	url_file(FileName);
+url(_) ->
+	bad_url.
+
+url_real(URL) ->
 	?deb("starting request to~n", [URL]),
 	% TODO: ask manager to if we can start (to limit number of concurrant connections)
-	
+	% TODO: parse and send data to queue, as we download data from internet, abort if we are downloading to long or to large,
+	% or feed format is invalid, or for example single item is much to large, or there is to many items
 	FetchResult = httpc:request(get, {URL, []}, [{timeout, 60000}, {connect_timeout, 30000}], [{body_format, binary}]),
 	try FetchResult of
 		{ok, {{_, 200, _}, _Headers, Body}} ->
@@ -26,6 +36,19 @@ url(URL) ->
 		error:E ->
 			{error, E}
 	end.
+
+url_file(FileName) ->
+	try file:read_file(FileName) of
+		{ok, Body} ->
+			ParingResult = erozja_parse:string(Body),
+			ParingResult;
+		E ->
+			E
+	catch
+		error:E ->
+			{error, E}
+	end.
+
 
 url(URL, ParentQueue) ->
 	case url(URL) of
