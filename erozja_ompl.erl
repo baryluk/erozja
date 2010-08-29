@@ -41,6 +41,11 @@ testrss() ->
 %
 % outline can be nested to create hierarchy
 
+% todo: unescape HTML entities like &amp;
+
+% http://www.opml.org/spec
+% http://www.opml.org/spec2
+
 start_testrss() ->
 	lists:foreach(fun(URL) ->
 		erozja_manager:add_feed(URL)
