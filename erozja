@@ -3,4 +3,4 @@
 # author 'baryluk@smp.if.uj.edu.pl'
 
 
-exec erl -smp enable +K true -mnesia dir "${HOME}/.erozja/mnesia-dir/"
+exec erl -smp enable +K true -mnesia dir "${HOME}/.erozja/mnesia-dir/" -run erozja_app go
