@@ -18,10 +18,14 @@ config_change(_Changed, _New, _Removed) ->
 
 
 go() ->
-	application:start(sasl),
-	application:start(inets),
-	application:start(wx),
-	application:start(erozja),
+	ok = application:start(sasl),
+	ok = application:start(crypto),
+	ok = application:start(public_key),
+	ok = application:start(ssl),
+	ok = application:start(inets),
+	ok = application:start(wx),
+	code:add_path("/sctank2/Projekty/Erlang/to_unicode"),
+	ok = application:start(erozja),
 	erozja_ompl:start_testrss(),
 	erozja_gui_wx:start().
 

@@ -13,7 +13,7 @@
 		erozja_gui_wx
 	]},
 	{registered, [erozja_sup, erozja_queues_sup, erozja_manger, erozja_queue, erozja_gui_wx]},
-	{applications, [kernel, stdlib, sasl, inets, wx]},
+	{applications, [kernel, stdlib, sasl, crypto, public_key, ssl, inets, wx]},
 	{mod, {erozja_app, []}},
 	{env, []}
 	]
