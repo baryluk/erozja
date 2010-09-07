@@ -42,7 +42,7 @@ stop_update(Pid) ->
 force_update(Pid) ->
 	gen_server:call(Pid, force_update).
 
-set_options(Pid, Opts) ->
+set_options(Pid, Opts) when is_list(Opts) ->
 	gen_server:call(Pid, {set_options, Opts}).
 
 last_update(Pid) ->
@@ -67,7 +67,7 @@ store(Pid, Item, Opts) ->
 %   {tag, Tg}
 %   seen
 
-init({url, URL}) ->
+init({url, URL}) when is_list(URL) ->
 	State0 = #state{url=URL, type=feed, title=URL},
 	State1 = set_timer(State0),
 	{ok, State1};
@@ -114,10 +114,10 @@ handle_call(Unknown, From, State) ->
 %   started_update
 %   updated
 
-handle_cast({add_item, Item}, State = #state{}) ->
+handle_cast({add_item, Item = #rss_item{}}, State = #state{}) ->
 	State1 = add(Item, State),
 	{noreply, State1};
-handle_cast({loader_done, LoaderPid, Status}, State = #state{subscribed_by = Clients, loader_pid=LoaderPid, loader_started=LoaderStarted}) ->
+handle_cast({loader_done, LoaderPid, Status}, State = #state{subscribed_by = Clients, loader_pid=LoaderPid, loader_started=LoaderStarted}) when is_pid(LoaderPid) ->
 	Diff = timer:now_diff(now(), LoaderStarted) div 1000,
 	notify({update_done, LoaderPid, Diff, Status}, Clients),
 	{noreply, State};

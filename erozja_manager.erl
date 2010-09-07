@@ -25,7 +25,7 @@ start_link() ->
 stop() ->
 	gen_server:cast(?REGC, stop).
 
-add_feed(URL) ->
+add_feed(URL) when is_list(URL) ->
 	gen_server:call(?REGC, {add_feed, URL}).
 
 list_feeds() ->
@@ -39,7 +39,7 @@ init(noargs) ->
 	{ok, #state{feeds=[]}}.
 
 
-handle_call({add_feed, URL}, _From, State = #state{feeds=Feeds}) ->
+handle_call({add_feed, URL}, _From, State = #state{feeds=Feeds}) when is_list(URL) ->
 	{ok, QueuePid} = erozja_queues_sup:start_child(URL),
 	NewFeed = {URL, QueuePid},
 	NewState = State#state{feeds = [NewFeed | Feeds]},
